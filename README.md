@@ -22,6 +22,8 @@ spawn notifications.
   aggression.
 - Detects traffic lights and vehicle queues before treating a driver as stuck.
 - Recovers genuinely stuck drivers and removes repeatedly broken entities.
+- Releases script ownership during player entry and carjacking so vanilla
+  animations can complete normally.
 - Suspends generation during missions, cutscenes, loading, and character
   switches.
 - Cleans all owned entities when the script is reloaded or aborted.
@@ -35,7 +37,7 @@ spawn notifications.
 - [ScriptHookVDotNet Enhanced](https://github.com/Chiheb-Bacha/ScriptHookVDotNetEnhanced)
 - Microsoft .NET Framework 4.8
 
-PascaTraffic v0.1.0 was developed and tested with:
+PascaTraffic v0.1.1 was developed and tested with:
 
 - GTA V Enhanced 1.0.1158.13
 - ScriptHookVDotNet Enhanced 1.1.0.6
@@ -43,7 +45,7 @@ PascaTraffic v0.1.0 was developed and tested with:
 
 ## Installation
 
-1. Download `PascaTraffic-v0.1.0.zip` from the Releases page.
+1. Download `PascaTraffic-v0.1.1.zip` from the Releases page.
 2. Extract these files into the GTA V Enhanced `scripts` directory:
    - `PascaTraffic.dll`
    - `PascaTraffic.ini`
@@ -265,6 +267,7 @@ Enhanced root directory.
 
 ## Project Status
 
-Version 0.1.0 is the initial public test release. Reports should include both
-`PascaTraffic.log` and `ScriptHookVDotNet.log`, the GTA V build number, and the
-ScriptHookVDotNet Enhanced version.
+Version 0.1.1 is the current public test release. It fixes driver recovery
+interfering with player-entry and carjacking animations. Reports should include
+both `PascaTraffic.log` and `ScriptHookVDotNet.log`, the GTA V build number, and
+the ScriptHookVDotNet Enhanced version.

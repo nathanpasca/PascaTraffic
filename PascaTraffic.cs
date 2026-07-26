@@ -12,8 +12,8 @@ using GTA.Native;
 [assembly: AssemblyCompany("nathanpasca")]
 [assembly: AssemblyProduct("PascaTraffic")]
 [assembly: AssemblyCopyright("Copyright 2026 nathanpasca")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
+[assembly: AssemblyFileVersion("0.1.1.0")]
 
 namespace PascaTraffic
 {
