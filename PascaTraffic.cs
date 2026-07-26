@@ -12,8 +12,8 @@ using GTA.Native;
 [assembly: AssemblyCompany("nathanpasca")]
 [assembly: AssemblyProduct("PascaTraffic")]
 [assembly: AssemblyCopyright("Copyright 2026 nathanpasca")]
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
+[assembly: AssemblyFileVersion("0.1.1.0")]
 
 namespace PascaTraffic
 {
@@ -59,6 +59,7 @@ namespace PascaTraffic
         private int _parkingScans;
         private int _parkingVehiclesSeen;
         private int _parkingCandidatesSeen;
+        private int _releasedForPlayer;
 
         internal static readonly HashSet<string> RichZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -150,6 +151,8 @@ namespace PascaTraffic
 
                 Ped player = Game.Player.Character;
                 if (player == null || !player.Exists()) return;
+
+                HandlePlayerVehicleEntry(player);
 
                 if (Game.GameTime >= _nextWatchdog)
                 {
@@ -448,6 +451,49 @@ namespace PascaTraffic
 
             if (count == 0) return _config.BlockedRoadInitialSpeed;
             return Math.Max(_config.BlockedRoadInitialSpeed, Math.Min(cruiseSpeed, total / count));
+        }
+
+        private void HandlePlayerVehicleEntry(Ped player)
+        {
+            Vehicle target = player.VehicleTryingToEnter;
+            if (target == null || !target.Exists()) return;
+
+            for (int i = _traffic.Count - 1; i >= 0; i--)
+            {
+                TrafficSlot slot = _traffic[i];
+                Vehicle vehicle = slot.Vehicle;
+                if (vehicle == null || !vehicle.Exists() || vehicle.Handle != target.Handle)
+                    continue;
+
+                Ped driver = slot.Driver;
+                if (driver != null && driver.Exists())
+                {
+                    driver.BlockPermanentEvents = false;
+                    driver.CanBeDraggedOutOfVehicle = true;
+                    Function.Call(Hash.SET_PED_KEEP_TASK, driver, false);
+                }
+
+                Function.Call(Hash.SET_VEHICLE_DOORS_LOCKED, vehicle, 1);
+                ReleaseTrafficSlot(slot);
+                _traffic.RemoveAt(i);
+                _releasedForPlayer++;
+                _log.Info("Released an MP traffic vehicle for player entry/carjacking.");
+                return;
+            }
+
+            for (int i = _parked.Count - 1; i >= 0; i--)
+            {
+                Vehicle vehicle = _parked[i].Vehicle;
+                if (vehicle == null || !vehicle.Exists() || vehicle.Handle != target.Handle)
+                    continue;
+
+                Function.Call(Hash.SET_VEHICLE_DOORS_LOCKED, vehicle, 1);
+                vehicle.MarkAsNoLongerNeeded();
+                _parked.RemoveAt(i);
+                _releasedForPlayer++;
+                _log.Info("Released a parked MP vehicle for player entry.");
+                return;
+            }
         }
 
         private void MaintainTraffic(Ped player)
@@ -779,7 +825,8 @@ namespace PascaTraffic
                 ", cleaned=" + _cleaned +
                 ", parkingScans=" + _parkingScans +
                 ", parkingVehiclesSeen=" + _parkingVehiclesSeen +
-                ", parkingCandidatesSeen=" + _parkingCandidatesSeen + ".");
+                ", parkingCandidatesSeen=" + _parkingCandidatesSeen +
+                ", releasedForPlayer=" + _releasedForPlayer + ".");
         }
 
         private void OnAborted(object sender, EventArgs e)

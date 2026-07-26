@@ -2,6 +2,17 @@
 
 All notable changes to PascaTraffic are documented in this file.
 
+## 0.1.1 - 2026-07-26
+
+- Fixed a carjacking race condition that could place the original driver back
+  into the vehicle while the player was entering.
+- PascaTraffic now detects when the player targets an owned vehicle and
+  releases the driver and vehicle from script control.
+- Prevented the stuck-driver watchdog from recovering a driver during a
+  player-entry or carjacking animation.
+- Added `releasedForPlayer` to diagnostic summaries.
+- Expanded the README configuration guide for non-technical users.
+
 ## 0.1.0 - 2026-07-26
 
 Initial public test release.
