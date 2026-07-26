@@ -1,0 +1,18 @@
+# Build output
+*.dll
+*.pdb
+*.zip
+bin/
+obj/
+dist/
+
+# Runtime output
+*.log
+
+# Editor and operating-system files
+.vs/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
