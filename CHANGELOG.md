@@ -2,6 +2,32 @@
 
 All notable changes to PascaTraffic are documented in this file.
 
+## 0.2.0 - 2026-07-27
+
+- Enforced `MaxSpawnDistance` as a real road-node acceptance limit instead of
+  allowing sparse nodes almost as far away as the cleanup radius.
+- Added a separate, bounded rural node distance and support for unpaved roads.
+- Expanded rural zone classification for the northern half of the map.
+- Required new traffic to spawn in the player's forward road corridor.
+- Added early cleanup for generated vehicles that fall well behind the player.
+- Increased the recommended moving-traffic pool from 8 to 16 vehicles.
+- Added a configurable recent-model cooldown to reduce visible repetition.
+- Added an optional free-roam vanilla traffic-density rebalance so MP vehicles
+  are more noticeable without relying only on additional entities.
+- Added a relaxed fallback after forward-preferred city node attempts so
+  winding or unusual road layouts cannot starve the traffic pool.
+- Added recent generated model names to diagnostic summaries.
+- Added region and visibility counters to runtime diagnostic summaries.
+- Expanded the supplied GTA Online vehicle catalog from 155 to 339 models.
+- Added a separate zone-aware sports-classic category.
+- Included drift variants while excluding Arena War, weaponized, police and
+  emergency, dedicated race, and mission-specific vehicles.
+- Added the experimental `AllowDuringMissions` option, disabled by default.
+  Mission mode permits only additive moving traffic; parking replacement and
+  Rockstar density adjustment remain suspended.
+- Added a second vehicle-occupancy check immediately before creation to close
+  the model-streaming window where vanilla traffic could enter a clear node.
+
 ## 0.1.1 - 2026-07-26
 
 - Fixed a carjacking race condition that could place the original driver back
