@@ -51,10 +51,12 @@ namespace PascaTraffic
         private int _nextSummary;
         private int _resumeTime;
         private bool _wasRestricted;
+        private bool _wasMissionActive;
 
         private int _attempts;
         private int _noNode;
         private int _occupied;
+        private int _finalOccupied;
         private int _invalidModel;
         private int _spawnedTraffic;
         private int _spawnedParking;
@@ -130,6 +132,7 @@ namespace PascaTraffic
                 _log.Info("PascaTraffic started.");
                 _log.Info("Traffic enabled=" + _config.TrafficEnabled +
                           ", parking enabled=" + _config.ParkingEnabled +
+                          ", allow during missions=" + _config.AllowDuringMissions +
                           ", models=" + _catalog.Count + ".");
 
                 _nextTrafficSpawn = Game.GameTime + _config.StartupGraceMs;
@@ -150,7 +153,8 @@ namespace PascaTraffic
             {
                 if (_config == null || !_config.Enabled) return;
 
-                if (IsRestrictedState())
+                bool missionActive = Function.Call<bool>(Hash.GET_MISSION_FLAG);
+                if (IsRestrictedState(missionActive))
                 {
                     if (!_wasRestricted)
                     {
@@ -168,6 +172,19 @@ namespace PascaTraffic
                     _log.Info("Free roam restored; generators resume after grace period.");
                 }
 
+                if (missionActive && !_wasMissionActive)
+                {
+                    _wasMissionActive = true;
+                    CleanupParkingForMission();
+                    _log.Info("Mission traffic enabled; parking replacement and density adjustment remain suspended.");
+                }
+                else if (!missionActive && _wasMissionActive)
+                {
+                    _wasMissionActive = false;
+                    _resumeTime = Game.GameTime + _config.MissionGraceMs;
+                    _log.Info("Mission ended; all generators resume after grace period.");
+                }
+
                 if (Game.GameTime < _resumeTime) return;
 
                 Ped player = Game.Player.Character;
@@ -178,7 +195,8 @@ namespace PascaTraffic
                 if (Game.GameTime >= _nextWatchdog)
                 {
                     MaintainTraffic(player);
-                    MaintainParking(player);
+                    if (!missionActive)
+                        MaintainParking(player);
                     _nextWatchdog = Game.GameTime + _config.WatchdogIntervalMs;
                 }
 
@@ -190,7 +208,8 @@ namespace PascaTraffic
                     _nextTrafficSpawn = Game.GameTime + _config.TrafficSpawnIntervalMs;
                 }
 
-                if (_config.ParkingEnabled &&
+                if (!missionActive &&
+                    _config.ParkingEnabled &&
                     _parked.Count < _config.MaxParkedVehicles &&
                     Game.GameTime >= _nextParkingScan)
                 {
@@ -210,9 +229,9 @@ namespace PascaTraffic
             }
         }
 
-        private bool IsRestrictedState()
+        private bool IsRestrictedState(bool missionActive)
         {
-            if (Function.Call<bool>(Hash.GET_MISSION_FLAG)) return true;
+            if (missionActive && !_config.AllowDuringMissions) return true;
             if (Function.Call<bool>(Hash.IS_CUTSCENE_PLAYING)) return true;
             if (Function.Call<bool>(Hash.IS_PLAYER_SWITCH_IN_PROGRESS)) return true;
 
@@ -382,10 +401,7 @@ namespace PascaTraffic
 
                 if ((flags & rejectedFlags) != 0) continue;
 
-                if (Function.Call<bool>(
-                    Hash.IS_ANY_VEHICLE_NEAR_POINT,
-                    node.X, node.Y, node.Z,
-                    _config.SpawnClearRadius))
+                if (IsSpawnPointOccupied(node))
                 {
                     _occupied++;
                     continue;
@@ -447,6 +463,16 @@ namespace PascaTraffic
 
             try
             {
+                // Model streaming can yield long enough for Rockstar traffic to
+                // enter a node that was clear during the road search. Recheck
+                // immediately before creation to close that overlap window.
+                if (IsSpawnPointOccupied(position))
+                {
+                    _occupied++;
+                    _finalOccupied++;
+                    return false;
+                }
+
                 vehicle = World.CreateVehicle(model, position, heading);
             }
             finally
@@ -460,6 +486,14 @@ namespace PascaTraffic
             Function.Call(Hash.SET_VEHICLE_ON_GROUND_PROPERLY, vehicle, 5.0f);
             Function.Call(Hash.SET_VEHICLE_ENGINE_ON, vehicle, true, true, false);
             return true;
+        }
+
+        private bool IsSpawnPointOccupied(Vector3 position)
+        {
+            return Function.Call<bool>(
+                Hash.IS_ANY_VEHICLE_NEAR_POINT,
+                position.X, position.Y, position.Z,
+                _config.SpawnClearRadius);
         }
 
         private void ConfigureAmbientDriver(Ped driver)
@@ -835,6 +869,16 @@ namespace PascaTraffic
             }
             _traffic.Clear();
 
+            CleanupParkingForMission();
+        }
+
+        private void CleanupParkingForMission()
+        {
+            Ped player = Game.Player.Character;
+            int playerVehicleHandle = 0;
+            if (player != null && player.Exists() && player.IsInVehicle())
+                playerVehicleHandle = player.CurrentVehicle.Handle;
+
             for (int i = _parked.Count - 1; i >= 0; i--)
             {
                 Vehicle vehicle = _parked[i].Vehicle;
@@ -959,6 +1003,7 @@ namespace PascaTraffic
                 ", spawnedParking=" + _spawnedParking +
                 ", noNode=" + _noNode +
                 ", occupied=" + _occupied +
+                ", finalOccupied=" + _finalOccupied +
                 ", invalidModel=" + _invalidModel +
                 ", retasked=" + _retasked +
                 ", cleaned=" + _cleaned +
@@ -1062,6 +1107,7 @@ namespace PascaTraffic
         public bool Enabled;
         public bool TrafficEnabled;
         public bool ParkingEnabled;
+        public bool AllowDuringMissions;
         public bool VerboseLogging;
 
         public int TickIntervalMs;
@@ -1120,6 +1166,7 @@ namespace PascaTraffic
             c.Enabled = settings.GetValue<bool>("MAIN", "Enabled", true);
             c.TrafficEnabled = settings.GetValue<bool>("MAIN", "TrafficEnabled", true);
             c.ParkingEnabled = settings.GetValue<bool>("MAIN", "ParkingEnabled", true);
+            c.AllowDuringMissions = settings.GetValue<bool>("MAIN", "AllowDuringMissions", false);
             c.VerboseLogging = settings.GetValue<bool>("MAIN", "VerboseLogging", false);
             c.TickIntervalMs = Clamp(settings.GetValue<int>("MAIN", "TickIntervalMs", 100), 25, 1000);
             c.StartupGraceMs = Clamp(settings.GetValue<int>("MAIN", "StartupGraceMs", 8000), 1000, 60000);

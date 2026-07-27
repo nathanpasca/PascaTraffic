@@ -22,6 +22,11 @@ All notable changes to PascaTraffic are documented in this file.
 - Added a separate zone-aware sports-classic category.
 - Included drift variants while excluding Arena War, weaponized, police and
   emergency, dedicated race, and mission-specific vehicles.
+- Added the experimental `AllowDuringMissions` option, disabled by default.
+  Mission mode permits only additive moving traffic; parking replacement and
+  Rockstar density adjustment remain suspended.
+- Added a second vehicle-occupancy check immediately before creation to close
+  the model-streaming window where vanilla traffic could enter a clear node.
 
 ## 0.1.1 - 2026-07-26
 

@@ -32,8 +32,8 @@ spawn notifications.
 - Recovers genuinely stuck drivers and removes repeatedly broken entities.
 - Releases script ownership during player entry and carjacking so vanilla
   animations can complete normally.
-- Suspends generation during missions, cutscenes, loading, and character
-  switches.
+- Suspends generation during missions by default and always suspends during
+  cutscenes, loading, death, and character switches.
 - Cleans all owned entities when the script is reloaded or aborted.
 - Keeps entity counts bounded and performs expensive scans on timed intervals.
 - Writes a compact diagnostic summary to `scripts/PascaTraffic.log`.
@@ -110,6 +110,7 @@ values.
 | `Enabled` | `true` | Master switch for the entire mod. Set this to `false` to keep the DLL installed but stop all PascaTraffic activity. |
 | `TrafficEnabled` | `true` | Enables moving GTA Online vehicles in normal road traffic. |
 | `ParkingEnabled` | `true` | Enables GTA Online vehicles in suitable parking locations. |
+| `AllowDuringMissions` | `false` | Experimental option that allows only newly generated moving traffic during missions. Parking replacement and Rockstar traffic-density adjustment remain disabled to protect mission vehicles and scripted traffic. |
 | `VerboseLogging` | `false` | Writes extra technical details to the log. Leave this off for normal play and turn it on only when diagnosing a problem. |
 | `TickIntervalMs` | `100` | How often the lightweight scheduler wakes up. `100` means ten times per second. Higher values use slightly less CPU but make timers less precise. |
 | `StartupGraceMs` | `8000` | Waits eight seconds after the script starts before adding vehicles. This gives Story Mode time to finish loading. |
@@ -134,7 +135,7 @@ this mod.
 | `MinSpawnForwardDot` | `0.05` | Rejects nodes behind the player on dense paved-road searches. Rural and hill roads skip this rule because hairpins can place the next valid road node beside or geometrically behind the player. |
 | `BehindDespawnDistance` | `170.0` | Starts freeing slots earlier when generated traffic has fallen behind the player. |
 | `BehindDespawnDot` | `-0.15` | Defines how far behind a vehicle must be before the shorter cleanup distance applies. |
-| `SpawnClearRadius` | `9.0` | Required empty space around a road node. Raising this reduces overlap risk but may reduce successful spawns in dense traffic. |
+| `SpawnClearRadius` | `9.0` | Required empty space around a road node. PascaTraffic checks it during the road search and again immediately before creation, after the model finishes loading. One meter is too small because vehicle centers can be more than one meter apart while their bodies still overlap. |
 | `NodeAttempts` | `18` | Number of road positions tried during one spawn attempt. Rural roads need a few more attempts because nodes are farther apart. |
 | `ModelAttempts` | `5` | Number of vehicle models tried if the first selected model cannot be loaded. |
 | `ModelRequestTimeoutMs` | `1200` | Maximum time allowed for one model-loading request. Increasing it may help very slow storage but can delay a spawn attempt. |
@@ -160,6 +161,19 @@ is negligible.
 The density adjustment uses GTA's per-frame traffic multiplier. It does not
 delete existing vanilla vehicles; the new mix becomes apparent naturally after
 driving through a few streets.
+
+### Missions
+
+The default `AllowDuringMissions = false` is the safest setting. Mission scripts
+can expect a particular vehicle handle, seat occupant, route, or traffic state.
+A replacement mod can change a setup vehicle before GTA marks it as a mission
+entity, causing an objective to wait for the original vehicle indefinitely.
+
+When `AllowDuringMissions = true`, PascaTraffic permits only its additive moving
+traffic generator. It does not replace parked vehicles and does not alter
+Rockstar's traffic density until the mission flag has cleared and the configured
+grace period has passed. Cutscenes, loading, death, and character switches
+remain blocked regardless of this setting.
 
 ### Driver Behavior
 
