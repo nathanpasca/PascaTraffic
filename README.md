@@ -11,10 +11,18 @@ spawn notifications.
 
 ## Features
 
-- Adds 155 curated GTA Online road vehicles.
+- Adds 339 curated GTA Online road vehicles across 13 traffic categories.
 - Selects appropriate vehicle classes for rich, middle-income, poor,
   industrial, and rural areas.
+- Keeps drift variants in the rotation and gives sports classics their own
+  zone-aware category.
 - Adds moving MP vehicles without deleting occupied vanilla traffic.
+- Keeps new traffic in the player's forward road corridor instead of allowing
+  sparse rural nodes to consume slots hundreds of meters away.
+- Supports mixed-surface and dirt roads in rural areas and the hills.
+- Avoids recently used models so the visible GTA Online selection rotates.
+- Optionally lowers only Rockstar's moving free-roam traffic so MP vehicles
+  become noticeable without filling the world with excessive extra entities.
 - Dynamically replaces suitable empty parked vehicles outside the player's
   immediate view.
 - Matches a spawned vehicle's initial speed to nearby traffic.
@@ -37,7 +45,7 @@ spawn notifications.
 - [ScriptHookVDotNet Enhanced](https://github.com/Chiheb-Bacha/ScriptHookVDotNetEnhanced)
 - Microsoft .NET Framework 4.8
 
-PascaTraffic v0.1.1 was developed and tested with:
+PascaTraffic v0.2.0 was developed and tested with:
 
 - GTA V Enhanced 1.0.1158.13
 - ScriptHookVDotNet Enhanced 1.1.0.6
@@ -45,7 +53,7 @@ PascaTraffic v0.1.1 was developed and tested with:
 
 ## Installation
 
-1. Download `PascaTraffic-v0.1.1.zip` from the Releases page.
+1. Download `PascaTraffic-v0.2.0.zip` from the Releases page.
 2. Extract these files into the GTA V Enhanced `scripts` directory:
    - `PascaTraffic.dll`
    - `PascaTraffic.ini`
@@ -116,21 +124,42 @@ this mod.
 
 | Setting | Default | Plain-language explanation |
 | --- | ---: | --- |
-| `MaxVehicles` | `8` | Maximum additional moving vehicles. Use `6` for a lighter setup, `8` for the recommended balance, or `10` for more variety. |
-| `SpawnIntervalMs` | `3500` | Time between spawn attempts. A lower value fills traffic faster but performs road searches more often. |
+| `MaxVehicles` | `16` | Maximum additional moving vehicles. Sixteen makes GTA Online vehicles easier to encounter while keeping ownership bounded. |
+| `SpawnIntervalMs` | `1800` | Time between spawn attempts. A lower value fills traffic faster but performs road searches more often. |
 | `MinSpawnDistance` | `95.0` | The closest distance at which a vehicle may appear. Lower values make new cars easier to notice popping in. |
-| `MaxSpawnDistance` | `180.0` | The farthest distance used when searching for a road spawn point. |
-| `DespawnDistance` | `420.0` | Removes a PascaTraffic vehicle after it becomes this far from the player. This prevents vehicles accumulating across the map. |
+| `MaxSpawnDistance` | `190.0` | Hard maximum accepted distance for a city or suburban road node. |
+| `RuralMaxSpawnDistance` | `220.0` | Small extra allowance for the wider spacing between rural road nodes. |
+| `DespawnDistance` | `360.0` | Removes a PascaTraffic vehicle after it becomes this far from the player. This prevents vehicles accumulating across the map. |
+| `AllowUnpavedInRural` | `true` | Allows dirt and mixed-surface vehicle nodes in northern and rural regions. |
+| `MinSpawnForwardDot` | `0.05` | Rejects nodes behind the player on dense paved-road searches. Rural and hill roads skip this rule because hairpins can place the next valid road node beside or geometrically behind the player. |
+| `BehindDespawnDistance` | `170.0` | Starts freeing slots earlier when generated traffic has fallen behind the player. |
+| `BehindDespawnDot` | `-0.15` | Defines how far behind a vehicle must be before the shorter cleanup distance applies. |
 | `SpawnClearRadius` | `9.0` | Required empty space around a road node. Raising this reduces overlap risk but may reduce successful spawns in dense traffic. |
-| `NodeAttempts` | `14` | Number of road positions tried during one spawn attempt. Leave this at the default unless the log repeatedly reports `noNode`. |
+| `NodeAttempts` | `18` | Number of road positions tried during one spawn attempt. Rural roads need a few more attempts because nodes are farther apart. |
 | `ModelAttempts` | `5` | Number of vehicle models tried if the first selected model cannot be loaded. |
 | `ModelRequestTimeoutMs` | `1200` | Maximum time allowed for one model-loading request. Increasing it may help very slow storage but can delay a spawn attempt. |
 
 Recommended limits:
 
 - `6` to `8` moving vehicles for integrated graphics or older CPUs.
-- `8` to `10` moving vehicles for a typical gaming PC.
-- Values above `12` are not recommended without extended testing.
+- `12` to `16` moving vehicles for a typical gaming PC.
+- Values above `18` are not recommended without extended testing.
+
+### Vehicle Variety
+
+| Setting | Default | Plain-language explanation |
+| --- | ---: | --- |
+| `RecentModelWindow` | `24` | PascaTraffic normally avoids using a model again until 24 other generated models have appeared. Set it lower for a smaller rotation or `0` to allow unrestricted random repeats. |
+| `AdjustVanillaTraffic` | `true` | Rebalances only Rockstar's moving traffic while free roaming. It does not reduce parked cars and automatically stops during missions, cutscenes, and character switches. |
+| `VanillaTrafficDensity` | `0.55` | `1.0` is Rockstar's normal moving-traffic density. The default keeps 55 percent of that traffic so the generated MP vehicles are easier to recognize without making roads empty. |
+
+The cooldown is shared by moving and parked MP vehicles. It does not reserve or
+load 24 models at once; it only remembers their names, so its performance cost
+is negligible.
+
+The density adjustment uses GTA's per-frame traffic multiplier. It does not
+delete existing vanilla vehicles; the new mix becomes apparent naturally after
+driving through a few streets.
 
 ### Driver Behavior
 
@@ -204,6 +233,9 @@ TickIntervalMs = 150
 MaxVehicles = 6
 SpawnIntervalMs = 4500
 
+[VARIETY]
+AdjustVanillaTraffic = false
+
 [PARKING]
 MaxVehicles = 6
 ScanIntervalMs = 5000
@@ -217,8 +249,11 @@ Use the supplied `PascaTraffic.ini` without changes.
 
 ```ini
 [TRAFFIC]
-MaxVehicles = 10
-SpawnIntervalMs = 3000
+MaxVehicles = 18
+SpawnIntervalMs = 1500
+
+[VARIETY]
+VanillaTrafficDensity = 0.40
 
 [PARKING]
 MaxVehicles = 12
@@ -227,9 +262,10 @@ MaxVehicles = 12
 The higher-variety preset adds more persistent entities. Test it for a while
 before increasing the values further.
 
-Vehicle model names can be edited in `PascaTraffic_Vehicles.ini`. Weaponized,
-aircraft, boats, emergency vehicles, and special-purpose vehicles are excluded
-from the supplied catalog.
+Vehicle model names can be edited in `PascaTraffic_Vehicles.ini`. The supplied
+catalog includes normal road-going DLC cars and drift variants. Arena War,
+weaponized, police and emergency, dedicated race, aircraft, boat, and
+mission-specific models are excluded.
 
 ## Performance
 
@@ -239,7 +275,7 @@ multi-second timers. Road occupancy uses a native boolean query instead of
 allocating nearby-vehicle arrays, and parking selection uses a single-pass
 candidate algorithm.
 
-The default configuration owns at most eight moving vehicles and ten parked
+The default configuration owns at most sixteen moving vehicles and ten parked
 vehicles. Distant entities are cleaned automatically.
 
 ## Building
@@ -258,16 +294,19 @@ csc.exe /target:library /platform:x64 /optimize+ `
 ## Diagnostics
 
 Runtime statistics are written to `scripts/PascaTraffic.log` every 30 seconds.
-The log includes active and total spawn counts, road-node failures, occupied
-spawn points, invalid models, AI recoveries, cleanup counts, and parking
-candidate statistics.
+The log includes active and total spawn counts, the current and last spawn
+zones, rejected distant or behind-road candidates, unpaved-road searches,
+behind-player cleanup, recent-model rerolls, AI recovery, and parking
+candidate statistics. The latest generated model names are included so a
+player can distinguish PascaTraffic vehicles from Rockstar's base population.
 
 Script loading errors are written to `ScriptHookVDotNet.log` in the GTA V
 Enhanced root directory.
 
 ## Project Status
 
-Version 0.1.1 is the current public test release. It fixes driver recovery
-interfering with player-entry and carjacking animations. Reports should include
-both `PascaTraffic.log` and `ScriptHookVDotNet.log`, the GTA V build number, and
-the ScriptHookVDotNet Enhanced version.
+Version 0.2.0 is the current test build. It improves visible GTA Online vehicle
+variety in Vinewood Hills, Grand Senora Desert, Paleto Bay, and other sparse
+rural regions while retaining the v0.1.1 carjacking safeguards. Reports should
+include both `PascaTraffic.log` and `ScriptHookVDotNet.log`, the GTA V build
+number, and the ScriptHookVDotNet Enhanced version.

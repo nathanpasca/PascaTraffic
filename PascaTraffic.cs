@@ -12,8 +12,8 @@ using GTA.Native;
 [assembly: AssemblyCompany("nathanpasca")]
 [assembly: AssemblyProduct("PascaTraffic")]
 [assembly: AssemblyCopyright("Copyright 2026 nathanpasca")]
-[assembly: AssemblyVersion("0.1.1.0")]
-[assembly: AssemblyFileVersion("0.1.1.0")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
 
 namespace PascaTraffic
 {
@@ -26,6 +26,7 @@ namespace PascaTraffic
             public Vector3 LastPosition;
             public int LastProgressTime;
             public int Recoveries;
+            public string SpawnZone;
         }
 
         private sealed class ParkedSlot
@@ -36,6 +37,9 @@ namespace PascaTraffic
         private readonly Random _random = new Random();
         private readonly List<TrafficSlot> _traffic = new List<TrafficSlot>();
         private readonly List<ParkedSlot> _parked = new List<ParkedSlot>();
+        private readonly Queue<string> _recentModels = new Queue<string>();
+        private readonly HashSet<string> _recentModelSet =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private ModConfig _config;
         private ModelCatalog _catalog;
@@ -60,6 +64,12 @@ namespace PascaTraffic
         private int _parkingVehiclesSeen;
         private int _parkingCandidatesSeen;
         private int _releasedForPlayer;
+        private int _candidateTooFar;
+        private int _candidateBehind;
+        private int _behindCleaned;
+        private int _unpavedSearches;
+        private int _recentModelRerolls;
+        private string _lastSpawnZone = "NONE";
 
         internal static readonly HashSet<string> RichZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -69,8 +79,19 @@ namespace PascaTraffic
 
         internal static readonly HashSet<string> RuralZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "SANDY", "GRAPES", "ALAMO", "DESRT", "MTJOSE", "MTGORDO",
-            "PALCOV", "PALETO", "CHU", "CCREAK", "CMSW", "TATAMO"
+            "ALAMO", "BANHAMCA", "BAYTRE", "BHAMCA", "BRADP", "BRADT",
+            "CALAFB", "CANNY", "CCREAK", "CHU", "CMSW", "DESRT", "ELGORL",
+            "GALFISH", "GRAPES", "GREATC", "HARMO", "HUMLAB", "LACT", "LAGO",
+            "LDAM", "MTCHIL", "MTGORDO", "MTJOSE", "NCHU", "PALCOV",
+            "PALETO", "PALFOR", "PALHIGH", "PALMPOW", "PROCOB", "RTRAK",
+            "SANCHIA", "SANDY", "SLAB", "TATAMO", "TONGVAH", "TONGVAV",
+            "WINDF", "ZANCUDO", "ZQ_UAR"
+        };
+
+        private static readonly HashSet<string> MixedRoadZones =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CHIL", "RGLEN", "OBSERV", "GALLI"
         };
 
         internal static readonly HashSet<string> PoorZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -217,7 +238,7 @@ namespace PascaTraffic
                 return;
             }
 
-            string modelName = _catalog.Pick(zone, _random);
+            string modelName = PickFreshModel(zone);
             Vehicle vehicle;
             string actualModelName;
             if (!TryCreateVehicle(modelName, zone, candidate.Position, candidate.Heading, out vehicle, out actualModelName))
@@ -255,8 +276,11 @@ namespace PascaTraffic
             slot.LastPosition = vehicle.Position;
             slot.LastProgressTime = Game.GameTime;
             slot.Recoveries = 0;
+            slot.SpawnZone = zone;
             _traffic.Add(slot);
+            RememberModel(actualModelName);
             _spawnedTraffic++;
+            _lastSpawnZone = zone;
 
             if (_config.VerboseLogging)
             {
@@ -276,6 +300,12 @@ namespace PascaTraffic
             forward.Z = 0.0f;
             if (forward.LengthSquared() < 0.01f) forward = Vector3.RelativeFront;
             forward.Normalize();
+
+            string originZone = GetZone(origin);
+            bool allowUnpaved = _config.AllowUnpavedInRural &&
+                (RuralZones.Contains(originZone) || MixedRoadZones.Contains(originZone));
+            int nodeFlags = allowUnpaved ? 1 : 0;
+            if (allowUnpaved) _unpavedSearches++;
 
             for (int attempt = 0; attempt < _config.NodeAttempts; attempt++)
             {
@@ -299,7 +329,7 @@ namespace PascaTraffic
                     search.X, search.Y, search.Z,
                     desired.X, desired.Y, desired.Z,
                     nth, outPosition, outHeading,
-                    0, 3.0f, 0.0f);
+                    nodeFlags, 3.0f, 0.0f);
 
                 if (!found) continue;
 
@@ -307,9 +337,35 @@ namespace PascaTraffic
                 if (node == Vector3.Zero) continue;
 
                 float actualDistance = origin.DistanceTo(node);
-                if (actualDistance < _config.MinSpawnDistance ||
-                    actualDistance > _config.DespawnDistance - 40.0f)
+                if (actualDistance < _config.MinSpawnDistance)
                     continue;
+
+                float allowedMaxDistance = RuralZones.Contains(originZone)
+                    ? _config.RuralMaxSpawnDistance
+                    : _config.MaxSpawnDistance;
+                if (actualDistance > allowedMaxDistance)
+                {
+                    _candidateTooFar++;
+                    continue;
+                }
+
+                Vector3 toNode = node - origin;
+                toNode.Z = 0.0f;
+                if (toNode.LengthSquared() < 0.01f) continue;
+                toNode.Normalize();
+
+                // Curving rural roads and hill hairpins can place a valid node
+                // geometrically beside or behind the player's current heading.
+                // The hard distance limit keeps these nodes nearby, so apply the
+                // forward-cone rule only on the denser paved-road search.
+                int forwardPreferenceAttempts = Math.Max(1, (_config.NodeAttempts * 2) / 3);
+                if (!allowUnpaved &&
+                    attempt < forwardPreferenceAttempts &&
+                    Vector3.Dot(forward, toNode) < _config.MinSpawnForwardDot)
+                {
+                    _candidateBehind++;
+                    continue;
+                }
 
                 OutputArgument outDensity = new OutputArgument();
                 OutputArgument outFlags = new OutputArgument();
@@ -319,7 +375,11 @@ namespace PascaTraffic
                     outDensity, outFlags);
 
                 int flags = outFlags.GetResult<int>();
-                const int rejectedFlags = 1 | 8 | 32 | 1024;
+                const int alwaysRejectedFlags = 8 | 16 | 32 | 1024;
+                int rejectedFlags = alwaysRejectedFlags;
+                if (!allowUnpaved)
+                    rejectedFlags |= 1;
+
                 if ((flags & rejectedFlags) != 0) continue;
 
                 if (Function.Call<bool>(
@@ -353,7 +413,7 @@ namespace PascaTraffic
             {
                 string candidateName = modelAttempt == 0
                     ? preferredModelName
-                    : _catalog.Pick(zone, _random);
+                    : PickFreshModel(zone);
 
                 Model model = new Model(candidateName);
                 if (!model.IsValid || !model.IsInCdImage) continue;
@@ -530,6 +590,15 @@ namespace PascaTraffic
                     continue;
                 }
 
+                if (distance > _config.BehindDespawnDistance &&
+                    IsBehindPlayer(player, vehicle.Position, _config.BehindDespawnDot))
+                {
+                    DeleteTrafficSlot(slot);
+                    _traffic.RemoveAt(i);
+                    _behindCleaned++;
+                    continue;
+                }
+
                 Ped seatedDriver = vehicle.GetPedOnSeat(VehicleSeat.Driver);
                 if (seatedDriver == null || !seatedDriver.Exists() || seatedDriver.Handle != driver.Handle)
                 {
@@ -644,7 +713,7 @@ namespace PascaTraffic
             Vector3 rotation = original.Rotation;
             float heading = original.Heading;
             string zone = GetZone(position);
-            string modelName = _catalog.Pick(zone, _random);
+            string modelName = PickFreshModel(zone);
 
             Model requestedModel;
             string actualModelName;
@@ -680,7 +749,9 @@ namespace PascaTraffic
             ParkedSlot slot = new ParkedSlot();
             slot.Vehicle = replacement;
             _parked.Add(slot);
+            RememberModel(actualModelName);
             _spawnedParking++;
+            _lastSpawnZone = zone;
 
             if (_config.VerboseLogging)
                 _log.Info("Parking swapped: " + actualModelName + " zone=" + zone + ".");
@@ -804,6 +875,74 @@ namespace PascaTraffic
             }
         }
 
+        private static bool IsBehindPlayer(
+            Ped player,
+            Vector3 position,
+            float behindDot)
+        {
+            Vector3 toVehicle = position - player.Position;
+            toVehicle.Z = 0.0f;
+            if (toVehicle.LengthSquared() < 0.01f) return false;
+            toVehicle.Normalize();
+
+            Vector3 view = player.IsInVehicle()
+                ? player.CurrentVehicle.ForwardVector
+                : player.ForwardVector;
+            view.Z = 0.0f;
+            if (view.LengthSquared() < 0.01f) return false;
+            view.Normalize();
+
+            return Vector3.Dot(view, toVehicle) < behindDot;
+        }
+
+        private string PickFreshModel(string zone)
+        {
+            string selected = _catalog.Pick(zone, _random);
+            if (_config.RecentModelWindow <= 0) return selected;
+
+            for (int attempt = 0; attempt < 16; attempt++)
+            {
+                if (!_recentModelSet.Contains(selected))
+                    return selected;
+
+                _recentModelRerolls++;
+                selected = _catalog.Pick(zone, _random);
+            }
+
+            return selected;
+        }
+
+        private void RememberModel(string modelName)
+        {
+            if (_config.RecentModelWindow <= 0 || string.IsNullOrEmpty(modelName))
+                return;
+
+            if (_recentModelSet.Add(modelName))
+                _recentModels.Enqueue(modelName);
+
+            while (_recentModels.Count > _config.RecentModelWindow)
+            {
+                string oldest = _recentModels.Dequeue();
+                _recentModelSet.Remove(oldest);
+            }
+        }
+
+        private string GetRecentModelSummary(int maximumCount)
+        {
+            if (_recentModels.Count == 0 || maximumCount <= 0)
+                return "NONE";
+
+            string[] models = _recentModels.ToArray();
+            int start = Math.Max(0, models.Length - maximumCount);
+            string result = string.Empty;
+            for (int i = start; i < models.Length; i++)
+            {
+                if (result.Length > 0) result += "|";
+                result += models[i];
+            }
+            return result;
+        }
+
         private string GetZone(Vector3 position)
         {
             string zone = Function.Call<string>(Hash.GET_NAME_OF_ZONE, position.X, position.Y, position.Z);
@@ -826,7 +965,15 @@ namespace PascaTraffic
                 ", parkingScans=" + _parkingScans +
                 ", parkingVehiclesSeen=" + _parkingVehiclesSeen +
                 ", parkingCandidatesSeen=" + _parkingCandidatesSeen +
-                ", releasedForPlayer=" + _releasedForPlayer + ".");
+                ", releasedForPlayer=" + _releasedForPlayer +
+                ", currentZone=" + GetZone(Game.Player.Character.Position) +
+                ", lastSpawnZone=" + _lastSpawnZone +
+                ", candidateTooFar=" + _candidateTooFar +
+                ", candidateBehind=" + _candidateBehind +
+                ", behindCleaned=" + _behindCleaned +
+                ", unpavedSearches=" + _unpavedSearches +
+                ", recentModelRerolls=" + _recentModelRerolls +
+                ", recentModels=" + GetRecentModelSummary(8) + ".");
         }
 
         private void OnAborted(object sender, EventArgs e)
@@ -863,6 +1010,53 @@ namespace PascaTraffic
         }
     }
 
+    public sealed class PascaTrafficDensityScript : Script
+    {
+        private ModConfig _config;
+
+        public PascaTrafficDensityScript()
+        {
+            Tick += OnTick;
+            Interval = 0;
+
+            try
+            {
+                string scriptsPath = AppDomain.CurrentDomain.BaseDirectory;
+                _config = ModConfig.Load(Path.Combine(scriptsPath, "PascaTraffic.ini"));
+            }
+            catch
+            {
+                Abort();
+            }
+        }
+
+        private void OnTick(object sender, EventArgs e)
+        {
+            if (_config == null ||
+                !_config.Enabled ||
+                !_config.TrafficEnabled ||
+                !_config.AdjustVanillaTraffic ||
+                _config.VanillaTrafficDensity >= 0.999f)
+                return;
+
+            if (Function.Call<bool>(Hash.GET_MISSION_FLAG) ||
+                Function.Call<bool>(Hash.IS_CUTSCENE_PLAYING) ||
+                Function.Call<bool>(Hash.IS_PLAYER_SWITCH_IN_PROGRESS))
+                return;
+
+            Ped player = Game.Player.Character;
+            if (player == null || !player.Exists() || player.IsDead)
+                return;
+
+            Function.Call(
+                Hash.SET_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME,
+                _config.VanillaTrafficDensity);
+            Function.Call(
+                Hash.SET_RANDOM_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME,
+                _config.VanillaTrafficDensity);
+        }
+    }
+
     internal sealed class ModConfig
     {
         public bool Enabled;
@@ -884,6 +1078,14 @@ namespace PascaTraffic
         public int NodeAttempts;
         public int ModelAttempts;
         public int ModelRequestTimeoutMs;
+        public bool AllowUnpavedInRural;
+        public float RuralMaxSpawnDistance;
+        public float MinSpawnForwardDot;
+        public float BehindDespawnDistance;
+        public float BehindDespawnDot;
+        public int RecentModelWindow;
+        public bool AdjustVanillaTraffic;
+        public float VanillaTrafficDensity;
 
         public float CityMinSpeed;
         public float CityMaxSpeed;
@@ -933,6 +1135,36 @@ namespace PascaTraffic
             c.NodeAttempts = Clamp(settings.GetValue<int>("TRAFFIC", "NodeAttempts", 14), 1, 40);
             c.ModelAttempts = Clamp(settings.GetValue<int>("TRAFFIC", "ModelAttempts", 5), 1, 20);
             c.ModelRequestTimeoutMs = Clamp(settings.GetValue<int>("TRAFFIC", "ModelRequestTimeoutMs", 1200), 100, 5000);
+            c.AllowUnpavedInRural = settings.GetValue<bool>("TRAFFIC", "AllowUnpavedInRural", true);
+            c.RuralMaxSpawnDistance = Clamp(
+                settings.GetValue<float>("TRAFFIC", "RuralMaxSpawnDistance", 220.0f),
+                c.MaxSpawnDistance,
+                Math.Min(500.0f, c.DespawnDistance - 50.0f));
+            c.MinSpawnForwardDot = Clamp(
+                settings.GetValue<float>("TRAFFIC", "MinSpawnForwardDot", 0.05f),
+                -1.0f,
+                1.0f);
+            c.BehindDespawnDistance = Clamp(
+                settings.GetValue<float>("TRAFFIC", "BehindDespawnDistance", 170.0f),
+                c.MinSpawnDistance,
+                c.DespawnDistance - 20.0f);
+            c.BehindDespawnDot = Clamp(
+                settings.GetValue<float>("TRAFFIC", "BehindDespawnDot", -0.15f),
+                -1.0f,
+                1.0f);
+
+            c.RecentModelWindow = Clamp(
+                settings.GetValue<int>("VARIETY", "RecentModelWindow", 24),
+                0,
+                100);
+            c.AdjustVanillaTraffic = settings.GetValue<bool>(
+                "VARIETY",
+                "AdjustVanillaTraffic",
+                true);
+            c.VanillaTrafficDensity = Clamp(
+                settings.GetValue<float>("VARIETY", "VanillaTrafficDensity", 0.55f),
+                0.10f,
+                1.0f);
 
             c.CityMinSpeed = Clamp(settings.GetValue<float>("DRIVER", "CityMinSpeed", 10.0f), 2.0f, 30.0f);
             c.CityMaxSpeed = Clamp(settings.GetValue<float>("DRIVER", "CityMaxSpeed", 14.0f), c.CityMinSpeed, 40.0f);
@@ -985,27 +1217,27 @@ namespace PascaTraffic
 
         private static readonly string[] RichSelection =
         {
-            "Luxury", "Luxury", "Sports", "Sports", "SUV", "Sedan", "Coupe"
+            "Luxury", "Luxury", "Sports", "Sports", "Classic", "SUV", "Sedan", "Coupe"
         };
 
         private static readonly string[] MiddleSelection =
         {
-            "Sedan", "Sedan", "SUV", "Sports", "Muscle", "Compact", "Coupe", "Van"
+            "Sedan", "Sedan", "SUV", "Sports", "Classic", "Muscle", "Compact", "Coupe", "Van"
         };
 
         private static readonly string[] PoorSelection =
         {
-            "Compact", "Compact", "Sedan", "Muscle", "Muscle", "Lowrider", "Van", "SUV"
+            "Compact", "Compact", "Sedan", "Muscle", "Muscle", "Lowrider", "Classic", "Van", "SUV"
         };
 
         private static readonly string[] RuralSelection =
         {
-            "Pickup", "Pickup", "Offroad", "Offroad", "SUV", "Muscle", "Van", "Sedan"
+            "Pickup", "Pickup", "Offroad", "Offroad", "SUV", "Muscle", "Classic", "Van", "Sedan"
         };
 
         private static readonly string[] IndustrialSelection =
         {
-            "Van", "Van", "Pickup", "Industrial", "Sedan", "Muscle", "Offroad"
+            "Van", "Van", "Pickup", "Industrial", "Sedan", "Muscle", "Offroad", "Classic"
         };
 
         public int Count { get; private set; }
